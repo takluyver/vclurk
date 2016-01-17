@@ -30,7 +30,7 @@ class CommitsRelationship(Enum):
     divergent = 4
 
 @asyncio.coroutine
-def find_commit_relationship(a, b):
+def find_commit_relationship(a, b, repo):
     """Describes the relationship of a to b.
 
     Returns a CommitsRelationship; e.g.CommitsRelationship.ancestor if a is
@@ -39,11 +39,8 @@ def find_commit_relationship(a, b):
     if a == b:
         return CommitsRelationship.same
 
-    proc = yield from asyncio.create_subprocess_exec('git', 'merge-base', a, b,
-                                stdout=asyncio.subprocess.PIPE)
-
-    stdout, _ = yield from proc.communicate()
-    merge_base = stdout.strip().decode('ascii')
+    res = yield from git(('merge-base', a, b), repo, capture='stdout')
+    merge_base = res.stdout.strip().decode('ascii')
 
     if merge_base == a:
         return CommitsRelationship.ancestor
@@ -54,10 +51,9 @@ def find_commit_relationship(a, b):
 
 @asyncio.coroutine
 def git_status(repo):
-    proc = yield from git(('status', '--porcelain'), repo=repo, capture='stdout')
-    b, _ = yield from proc.communicate()
+    cmd_res = yield from git(('status', '--porcelain'), repo=repo, capture='stdout')
     res = []
-    for line in b.decode('utf-8').splitlines():
+    for line in cmd_res.stdout.decode('utf-8').splitlines():
         res.append((line[0], line[1], line[3:]))
     return res
 
@@ -93,8 +89,7 @@ def sync(repo, loop=None):
     for remote in remotes_to_fetch:
         remote_refs_before[remote] = read_refs_dir(repo / '.git/refs/remotes' / remote)
     print('Fetching:', remotes_to_fetch)
-    p = yield from git(('fetch', '--multiple') + tuple(remotes_to_fetch), repo=repo, capture='none')
-    yield from p.wait()
+    yield from git(('fetch', '--multiple') + tuple(remotes_to_fetch), repo=repo, capture='none')
     for remote in remotes_to_fetch:
         remote_refs_after[remote] = read_refs_dir(repo / '.git/refs/remotes' / remote)
 
@@ -113,12 +108,15 @@ def sync(repo, loop=None):
         if remote_after == local:
             continue  # Already in sync
 
-        finding_relationships.append(with_data(find_commit_relationship(local, remote_after),
-                                               (branch_name, branch_remote)))
+        finding_relationships.append(with_data(
+                find_commit_relationship(local, remote_after, repo),
+                (branch_name, branch_remote)
+        ))
 
 
     branches_to_push = []
     branches_conflicting = []
+    branches_updated = []
     for fut in asyncio.as_completed(finding_relationships):
         rel, (branch_name, branch_remote) = yield from fut
         if rel is CommitsRelationship.ancestor:
@@ -126,17 +124,17 @@ def sync(repo, loop=None):
             print('Can fast forward', branch_name)
             if branch_name == current_branch:
                 if (yield from safe_to_pull(repo)):
-                    p = yield from git(('reset', '{}/{}'.format(branch_remote, branch_name)), repo=repo)
-                    yield from p.wait()
+                    yield from git(('reset', '--keep', '{}/{}'.format(branch_remote, branch_name)), repo=repo)
                     print('Updated {} (current branch)'.format(branch_name))
+                    branches_updated.append(branch_name)
                 else:
                     print("Can't update current branch while there are local changes.")
                     print("Use 'git pull' to update manually")
                 continue
             branch_spec = 'remotes/{0}/{1}:{1}'.format(branch_remote, branch_name)
-            p = yield from git(('fetch', '.', branch_spec), repo=repo)
-            yield from p.wait()
+            yield from git(('fetch', '.', branch_spec), repo=repo)
             print('Updated branch', branch_name)
+            branches_updated.append(branch_name)
         elif rel is CommitsRelationship.descendant:
             branches_to_push.append((branch_name, branch_remote))
         elif rel is CommitsRelationship.divergent:
@@ -148,12 +146,13 @@ def sync(repo, loop=None):
 
     for remote, branches in to_push_by_origin.items():
         print("Pushing {} branches to {}".format(len(branches), remote))
-        p = yield from git(['push', remote] + branches, repo)
-        yield from p.wait()
+        yield from git(['push', remote] + branches, repo)
 
     if branches_conflicting:
         print('Could not update these branches because of conflicts:')
         print(*branches_conflicting, sep=', ')
+    elif not (to_push_by_origin or branches_updated):
+        print("All branches already up to date. :-)")
 
 def main(argv=None):
     #logging.basicConfig(level=logging.DEBUG)
