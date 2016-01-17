@@ -22,8 +22,10 @@ def fetch(repo, remote='origin', loop=None):
         if m:
             tracking_branches_updated.append(m.group(1, 2))
 
+    yield from proc.wait()
     return tracking_branches_updated
 
+@asyncio.coroutine
 def update_branch(repo, branch_name, loop=None):
     # TODO: look up relevant remote in git config
     branch_spec = 'remotes/origin/{0}:{0}'.format(branch_name)
