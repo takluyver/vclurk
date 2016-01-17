@@ -9,25 +9,6 @@ class Subcommand:
         self.entry_point = entry_point
         self.description = description
 
-subcommands = [
-    # User focussed
-    ('install', '.urlinstall:main',
-         'Download and install an application from a URL'),
-    ('installtar', '.install:main',
-         'Install a tarball that was already downloaded'),
-    ('list', '.list:main',
-         'List installed applications'),
-    ('uninstall', '.uninstall:main',
-         'Remove an installed application'),
-    # Developer focussed
-    ('verify', '.verify:main',
-         'Check an application directory or tarball for problems'),
-    ('pack', '.tarball:pack_main',
-         'Pack an application directory into a tarball'),
-    ('verify-index', '.verify_index:main',
-         'Check a batis_index.json file for problems'),
-]
-
 class Commander:
     def __init__(self, description=None, subcmds=None, package=None):
         assert subcmds is not None
