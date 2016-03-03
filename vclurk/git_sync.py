@@ -140,6 +140,24 @@ def sync(repo, loop=None):
         elif rel is CommitsRelationship.divergent:
             branches_conflicting.append((branch_name, branch_remote))
 
+    # If the branch we're on was merged into master, switch to master
+    if ('master' in local_refs) and current_branch != 'master':
+        master_remote = cfg['branch', 'master', 'remote']
+        master_commit = remote_refs_after[master_remote]['master']
+        if current_branch in branches_updated:
+            current_remote = cfg['branch', current_branch, 'remote']
+            current_commit = remote_refs_after[current_remote][current_branch]
+        else:
+            current_commit = local_refs[current_branch]
+        rel = yield from find_commit_relationship(current_commit, master_commit, repo)
+        if rel is CommitsRelationship.ancestor:
+            if (yield from safe_to_pull(repo)):
+                yield from git(('checkout', 'master'), repo)
+            else:
+                print('Branch merged to master, but there are uncommitted changes.')
+                print('To switch manually, run:')
+                print('  git checkout master')
+
     to_push_by_origin = defaultdict(list)
     for b, r in branches_to_push:
         to_push_by_origin[r].append(b)
